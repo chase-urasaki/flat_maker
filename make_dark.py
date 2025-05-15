@@ -10,31 +10,30 @@ Notes:
     python make_masterdark.py
 
 """
+#%%
 import sys
 import astropy.io.fits as fits
 import numpy as np
 import os
 import matplotlib.pyplot as plt
 import astropy.stats
-from scripts.utils import read_config_file
 import argparse
 
-# Read in config file from argument line (specified in pipeline)
-parser = argparse.ArgumentParser()
-parser.add_argument("--config", type=str, required=True, help="Path to the config file")
-parser.add_argument("--masterdark", type=str, help="Path to the master dark file")
-args = parser.parse_args()
-config = read_config_file(args.config)
+# # Read in config file from argument line (specified in pipeline)
+# parser = argparse.ArgumentParser()
+# parser.add_argument("--config", type=str, required=True, help="Path to the config file")
+# parser.add_argument("--masterdark", type=str, help="Path to the master dark file")
+# args = parser.parse_args()
+# config = read_config_file(args.config)
 
-NAME = config['Target']['name']
-DATE = config['Target']['date']
-SIGMA_CLIP = int(config['Pixel Masking']['dark_sigma'])
+SIGMA_CLIP = 5
 
-def make_calibration_directory(): 
-    # Create calibration directory if it doesn't exist
-    calibration_dir = f"calibrations/{NAME}_{DATE}"
-    os.makedirs(calibration_dir, exist_ok=True)
-    return calibration_dir
+
+# def make_calibration_directory(): 
+#     # Create calibration directory if it doesn't exist
+#     calibration_dir = f"calibrations/{NAME}_{DATE}"
+#     os.makedirs(calibration_dir, exist_ok=True)
+#     return calibration_dir
 
 def combine_darks(filenames, std_threshold=SIGMA_CLIP):
     all_masks = 0.
@@ -115,14 +114,33 @@ def combine_darks_robust(filenames, std_threshold=SIGMA_CLIP, min_frames=3, rela
     plt.show()
 
     return masterdark, std, master_mask
-
+#%%
 if __name__ == "__main__":
-    calibration_dir = make_calibration_directory()
+    #calibration_dir = make_calibration_directory()
+    # Specifiy data directory and list of darks
+    data_dir = 'NIRSPEC_HeI/fits/'
+    list_of_darks = 'NIRSPEC_HeI/darks_list.txt'
 
-    filenames = [line.strip() for line in open(f'{NAME}_{DATE}_darks.txt')]
-    #masterdark, std, mask = combine_darks(filenames)
-    masterdark, std, mask = combine_darks_robust(filenames, std_threshold=SIGMA_CLIP, min_frames=3)
+    filenames = [line.strip() for line in open(list_of_darks)]
+    # prepend the directory to each filename
+    full_filenames = [os.path.join(data_dir, filename) for filename in filenames]
+    # masterdark, std, mask = combine_darks(filenames)
+    masterdark, std, mask = combine_darks_robust(full_filenames, std_threshold=SIGMA_CLIP, min_frames=3)
     median_mask = astropy.stats.sigma_clip(masterdark, SIGMA_CLIP).mask
+
+    # plot the masterdark
+    plt.imshow(masterdark, origin='lower', cmap='gray')
+    plt.title("Master Dark")
+    plt.colorbar()
+    plt.show()
+
+    # plot the std
+    plt.imshow(std, origin='lower', cmap='gray')
+    plt.title("Standard Deviation")
+    plt.colorbar()
+    plt.show()
+
+    # plot the mask
     plt.imshow(median_mask, origin='lower', cmap='gray')
     plt.title("Median Mask")
     plt.colorbar()
@@ -132,4 +150,5 @@ if __name__ == "__main__":
                         fits.ImageHDU(std, name="STD"),
                         fits.ImageHDU(np.array(mask, dtype=int), name="MASK")])
 
-    hdul.writeto(os.path.join(calibration_dir,'masterdark.fits'), overwrite=True)
+    hdul.writeto(os.path.join('./NIRSPEC_HeI','masterdark.fits'), overwrite=True)
+    #%%

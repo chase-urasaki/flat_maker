@@ -118,8 +118,8 @@ def combine_darks_robust(filenames, std_threshold=SIGMA_CLIP, min_frames=3, rela
 if __name__ == "__main__":
     #calibration_dir = make_calibration_directory()
     # Specifiy data directory and list of darks
-    data_dir = 'NIRSPEC_HeI/fits/'
-    list_of_darks = 'NIRSPEC_HeI/darks_list.txt'
+    data_dir = 'NIRSPEC_1/221228/fits/'
+    list_of_darks = 'NIRSPEC_1/221228/darks_list.txt'
 
     filenames = [line.strip() for line in open(list_of_darks)]
     # prepend the directory to each filename
@@ -150,5 +150,5 @@ if __name__ == "__main__":
                         fits.ImageHDU(std, name="STD"),
                         fits.ImageHDU(np.array(mask, dtype=int), name="MASK")])
 
-    hdul.writeto(os.path.join('./NIRSPEC_HeI','masterdark.fits'), overwrite=True)
+    hdul.writeto(os.path.join('./NIRSPEC_1/221228','masterdark.fits'), overwrite=True)
     #%%

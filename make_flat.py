@@ -31,10 +31,10 @@ FLAT_MIN = NIRSPEC_CONSTANTS.FLAT_MIN
 FLAT_MAX = NIRSPEC_CONSTANTS.FLAT_MAX 
 MIN_ORDER_SEPARATION = NIRSPEC_CONSTANTS.MIN_ORDER_SEPARATION
 OVERSCAN_WIDTH = NIRSPEC_CONSTANTS.OVERSCAN_WIDTH
-FILTER = NIRSPEC_CONSTANTS.NIRSPECHEI_1
+FILTER = NIRSPEC_CONSTANTS.NIRSPEC1_70
 
 # Spcifiy dark parth 
-dark_path = 'NIRSPEC_HeI/masterdark.fits'
+dark_path = 'NIRSPEC_1/221228/masterdark.fits'
 
 def combine_flats(filenames, masterdark):
 
@@ -53,6 +53,8 @@ def combine_flats(filenames, masterdark):
             data.append(flat)
 
     data = np.array(data) * np.median(medians)
+    plt.imshow(data[0], origin='lower')
+    
     masterflat = np.median(data, axis=0)
     std = np.std(data, axis=0)
     return masterflat, std
@@ -163,8 +165,8 @@ if __name__ == "__main__":
         std = hdul["STD"].data if "STD" in hdul else np.zeros_like(masterdark)
         mask = hdul["MASK"].data.astype(bool) if "MASK" in hdul else np.zeros_like(masterdark, dtype=bool)
 
-    data_dir = 'NIRSPEC_HeI/fits/'
-    list_of_flats = 'NIRSPEC_HeI/flats_list.txt'
+    data_dir = 'NIRSPEC_1/221228/fits/'
+    list_of_flats = 'NIRSPEC_1/221228/flats_list.txt'
 
     filenames = [line.strip() for line in open(list_of_flats)]
     # prepend the directory to each filename
@@ -175,51 +177,51 @@ if __name__ == "__main__":
     #raw_masterflat, raw_std = combine_flats(filenames, masterdark_hdul[0].data)
     raw_masterflat, raw_std = combine_flats(full_filenames, masterdark)
     #combine_flats(full_filenames, masterdark)
-    # top_edges, bottom_edges = trace_edges(raw_masterflat, FILTER)
+    top_edges, bottom_edges = trace_edges(raw_masterflat, FILTER)
 
-    # #dark_bad_pixels = np.array(masterdark_hdul["MASK"].data, dtype=bool)
-    # dark_bad_pixels = np.array(mask, dtype=bool)
-    # is_bad_pixel = dark_bad_pixels
-    # is_bad_pixel[:, -RIGHT_MARGIN:] = False
-    # masterflat = interpolate_missing(raw_masterflat, is_bad_pixel)
+    #dark_bad_pixels = np.array(masterdark_hdul["MASK"].data, dtype=bool)
+    dark_bad_pixels = np.array(mask, dtype=bool)
+    is_bad_pixel = dark_bad_pixels
+    is_bad_pixel[:, -RIGHT_MARGIN:] = False
+    masterflat = interpolate_missing(raw_masterflat, is_bad_pixel)
 
-    # # Divide out smooth variations in spectrum
-    # masterflat, normalization = fit_and_divide(masterflat, top_edges, bottom_edges)
+    # Divide out smooth variations in spectrum
+    masterflat, normalization = fit_and_divide(masterflat, top_edges, bottom_edges)
 
-    # is_bad_pixel = identify_anomalous_gains(masterflat, is_bad_pixel, top_edges, bottom_edges)
+    is_bad_pixel = identify_anomalous_gains(masterflat, is_bad_pixel, top_edges, bottom_edges)
 
-    # image_hdu = fits.PrimaryHDU(masterflat)
-    # bad_pixels_hdu = fits.ImageHDU(np.array(is_bad_pixel, dtype=int), name="BADPIX")
+    image_hdu = fits.PrimaryHDU(masterflat)
+    bad_pixels_hdu = fits.ImageHDU(np.array(is_bad_pixel, dtype=int), name="BADPIX")
 
-    # #Create HDU of edge traces
-    # cols = fits.ColDefs([
-    #     fits.Column(name='Top edges', format='{}D'.format(N), array=np.array(top_edges)),
-    #     fits.Column(name='Bottom edges', format='{}D'.format(N), array=np.array(bottom_edges))
-    # ])
-    # edges_hdu = fits.BinTableHDU.from_columns(cols, name="EDGES")
+    #Create HDU of edge traces
+    cols = fits.ColDefs([
+        fits.Column(name='Top edges', format='{}D'.format(N), array=np.array(top_edges)),
+        fits.Column(name='Bottom edges', format='{}D'.format(N), array=np.array(bottom_edges))
+    ])
+    edges_hdu = fits.BinTableHDU.from_columns(cols, name="EDGES")
 
-    # #Create final mask
-    # mask = np.zeros(masterflat.shape, dtype=bool)
-    # mask[masterflat < FLAT_MIN] = True
-    # mask[masterflat > FLAT_MAX] = True
-    # mask[:, -RIGHT_MARGIN:] = True
-    # mask = np.logical_or(is_bad_pixel, mask)
-    # mask_hdu = fits.ImageHDU(np.array(mask, dtype=int), name="MASK")
+    #Create final mask
+    mask = np.zeros(masterflat.shape, dtype=bool)
+    mask[masterflat < FLAT_MIN] = True
+    mask[masterflat > FLAT_MAX] = True
+    mask[:, -RIGHT_MARGIN:] = True
+    mask = np.logical_or(is_bad_pixel, mask)
+    mask_hdu = fits.ImageHDU(np.array(mask, dtype=int), name="MASK")
 
-    # hdul = fits.HDUList([image_hdu, bad_pixels_hdu, edges_hdu, mask_hdu,
-    #                     fits.ImageHDU(raw_masterflat, name="RAW"),
-    #                     fits.ImageHDU(raw_std, name="STD"),
-    #                     fits.ImageHDU(normalization, name="NORMALIZATION")])
+    hdul = fits.HDUList([image_hdu, bad_pixels_hdu, edges_hdu, mask_hdu,
+                        fits.ImageHDU(raw_masterflat, name="RAW"),
+                        fits.ImageHDU(raw_std, name="STD"),
+                        fits.ImageHDU(normalization, name="NORMALIZATION")])
 
-    # hdul.writeto(os.path.join('./NIRSPEC_HeI'+ 'masterflat.fits'), overwrite=True)
+    hdul.writeto(os.path.join('./NIRSPEC_HeI'+ 'masterflat.fits'), overwrite=True)
 
-    # plt.imshow(masterflat, aspect='auto', origin='lower')
-    # plt.colorbar()
-    # plt.title(f"Master Flat for {FILTER}")
-    # for o in range(len(hdul["EDGES"].data)):
-    #     upper_edge, lower_edge = hdul["EDGES"].data[o]
-    #     plt.plot(upper_edge, color='r')
-    #     plt.plot(lower_edge, color='black')
-    # plt.show()    
+    plt.imshow(masterflat, aspect='auto', origin='lower')
+    plt.colorbar()
+    plt.title(f"Master Flat for {FILTER}")
+    for o in range(len(hdul["EDGES"].data)):
+        upper_edge, lower_edge = hdul["EDGES"].data[o]
+        plt.plot(upper_edge, color='r')
+        plt.plot(lower_edge, color='black')
+    plt.show()    
 
 #%%

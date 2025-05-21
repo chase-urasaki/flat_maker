@@ -22,6 +22,10 @@ import matplotlib.pyplot as plt
 from helper_functions import trace_edge, interpolate_missing,subtract_crosstalk, subtract_overscan
 import importlib
 import NIRSPEC_CONSTANTS
+from utils import robust_polyfit
+from utils import fit_gaussian
+
+
 
 # Import Constants
 N = NIRSPEC_CONSTANTS.N
@@ -34,7 +38,7 @@ OVERSCAN_WIDTH = NIRSPEC_CONSTANTS.OVERSCAN_WIDTH
 FILTER = NIRSPEC_CONSTANTS.NIRSPEC1_70
 
 # Spcifiy dark parth 
-dark_path = 'NIRSPEC_1/221228/masterdark.fits'
+dark_path = 'NIRSPEC_HeI/masterdark.fits'
 
 def combine_flats(filenames, masterdark):
 
@@ -46,6 +50,7 @@ def combine_flats(filenames, masterdark):
             flat = np.rot90(hdulist[0].data, 3) / hdulist[0].header["COADDS"]
             plt.imshow(flat, origin='lower')
             flat = subtract_crosstalk(flat)
+            plt.imshow(flat, origin='lower')
             flat = subtract_overscan(flat)
             flat -= masterdark
             medians.append(np.median(flat))
@@ -55,6 +60,28 @@ def combine_flats(filenames, masterdark):
     data = np.array(data) * np.median(medians)
     plt.imshow(data[0], origin='lower')
     
+    masterflat = np.median(data, axis=0)
+    std = np.std(data, axis=0)
+    return masterflat, std
+
+def combine_flats_new(filenames, masterdark):
+    data = np.zeros((len(filenames), N, N))
+    medians = np.zeros(len(filenames))
+    for i, filename in enumerate(filenames):
+        with fits.open(filename) as hdulist:
+            flat = np.rot90(hdulist[0].data, 3) / hdulist[0].header["COADDS"]
+            plt.imshow(flat, origin='lower')
+            # #xtalk_corrected_flat = subtract_crosstalk(flat)
+            # print(xtalk_corrected_flat, xtalk_corrected_flat.shape)
+            # # look for none values
+            # if np.any(np.isnan(xtalk_corrected_flat)):
+            #     print(f"Warning: {filename} contains NaN values.")
+            #     continue
+            overscan_corrected_flat = subtract_overscan(flat)
+            flat = overscan_corrected_flat - masterdark
+            medians[i] = np.median(flat)
+            flat /= np.median(flat)
+            data[i] = flat
     masterflat = np.median(data, axis=0)
     std = np.std(data, axis=0)
     return masterflat, std
@@ -119,24 +146,31 @@ def identify_anomalous_gains(masterflat, bad_pixel_map, top_edges, bottom_edges,
             bad_pixel_map[min_y : max_y, c][bad_gains] = True
     return bad_pixel_map
 
-def trace_edges(masterflat, FILTER, window=10, percentile=98):
+def trace_edges(masterflat, FILTER = None, window=10, percentile=98):
     print('Tracing edges...')
-    if filter is None:
+    if FILTER is None:
         edges = scipy.ndimage.sobel(masterflat, axis=0)
         edges[0:OVERSCAN_WIDTH + 2] = 0
 
         midsection = np.median(edges[:, int(N/2 - window) : int(N/2 + window)], axis=1)
-        plt.imshow(masterflat)
-        plt.figure()
+        plt.imshow(masterflat, origin='lower')
+        plt.colorbar()
+        plt.title(f"Master Flat")
+   
         plt.plot(midsection)
         plt.show()
         
         upper_positions = scipy.signal.find_peaks(midsection,
                                         height=np.percentile(midsection, percentile),
                                         distance=MIN_ORDER_SEPARATION)[0]
+        
+        # print upper_positions
+        print("Upper positions: ", upper_positions)
         lower_positions = scipy.signal.find_peaks(-midsection,
                                                   height=np.percentile(-midsection, percentile),
                                                   distance=MIN_ORDER_SEPARATION)[0]
+        print("Lower positions: ", lower_positions)
+    
     else:
         # Get filter bounds
         bounds = FILTER
@@ -148,12 +182,99 @@ def trace_edges(masterflat, FILTER, window=10, percentile=98):
     upper_edges = []
     lower_edges = []
 
-    for o in range(num_orders):
-        #print(o)
-        upper_edges.append(trace_edge(masterflat, upper_positions[o], False))
-        lower_edges.append(trace_edge(masterflat, lower_positions[o], True))
+    # for o in range(num_orders):
+    #     #print(o)
+    #     upper_edges.append(trace_edge(masterflat, upper_positions[o], False))
+    #     lower_edges.append(trace_edge(masterflat, lower_positions[o], True))
 
     return np.array(upper_edges), np.array(lower_edges)
+
+def trace_edges_new(masterflat, FILTER=None, window=10, percentile=99.5):
+    print('Tracing edges...')
+    
+    if FILTER is None:
+        # Detect edges along the vertical (spatial) axis
+        edges = scipy.ndimage.sobel(masterflat, axis=0)
+        edges[0:OVERSCAN_WIDTH + 2] = 0  # Remove overscan rows
+
+        # Compute the vertical profile at the center columns
+        #midsection = np.median(edges[:, int(N/2 - window) : int(N/2 + window)], axis=1)
+        quarter_section_left = np.median(edges[:, int(N/4 - window) : int(N/4 + window)], axis=1)
+        quarter_section_right = np.median(edges[:, int(N*3/4 - window) : int(N*3/4 + window)], axis=1)
+
+        # Plot the master flat with midsection profile overlaid
+        plt.figure(figsize=(12, 6))
+        plt.imshow(masterflat, origin='lower', aspect='auto', cmap='gray')
+        plt.title("Master Flat with quarter Trace")
+        plt.colorbar(label='Counts')
+
+        # Overlay midsection as a line in color (scaled to image width)
+        x = np.arange(masterflat.shape[0])
+        y = np.full_like(x, masterflat.shape[1] // 4)  # column center
+        plt.plot(y, x, color='cyan', lw=1, label='Mid-column')
+
+        # Plot detected upper and lower order positions
+        upper_positions_left = scipy.signal.find_peaks(quarter_section_left,
+                                                  height=np.percentile(quarter_section_left, percentile),
+                                                  distance=MIN_ORDER_SEPARATION)[0]
+        lower_positions_left = scipy.signal.find_peaks(-quarter_section_left,
+                                                  height=np.percentile(-quarter_section_left, percentile),
+                                                  distance=MIN_ORDER_SEPARATION)[0]
+        # upper_positions = scipy.signal.find_peaks(midsection,
+        #                                           height=np.percentile(midsection, percentile),
+        #                                           distance=MIN_ORDER_SEPARATION)[0]
+        # lower_positions = scipy.signal.find_peaks(-midsection,
+        #                                           height=np.percentile(-midsection, percentile),
+        #                                           distance=MIN_ORDER_SEPARATION)[0]
+        # find the
+
+        upper_positions_right = scipy.signal.find_peaks(quarter_section_right,
+                                                  height=np.percentile(quarter_section_right, percentile),
+                                                  distance=MIN_ORDER_SEPARATION)[0]
+        lower_positions_right = scipy.signal.find_peaks(-quarter_section_right, 
+                                                  height=np.percentile(-quarter_section_right, percentile),
+                                                  distance=MIN_ORDER_SEPARATION)[0]
+
+        for pos in upper_positions_left:
+            plt.axhline(pos, color='lime', linestyle='--', lw=1)
+        for pos in lower_positions_left:
+            plt.axhline(pos, color='magenta', linestyle='--', lw=1)
+
+        plt.legend(['column trace', 'Upper edges', 'Lower edges'])
+        plt.xlabel("X (columns)")
+        plt.ylabel("Y (rows)")
+        plt.tight_layout()
+        plt.show()
+
+        print("Upper positions: ", upper_positions_left)
+        print("Lower positions: ", lower_positions_left)
+
+    else:
+        bounds = FILTER
+        if len(bounds) == 2:
+            upper_positions = np.array([bounds[0]])
+            lower_positions = np.array([bounds[1]])
+
+    num_orders = min(len(upper_positions_left), len(lower_positions_left))
+    upper_edges = []
+    lower_edges = []
+
+    
+
+    #You can uncomment and define `trace_edge()` to use below:
+    # Select the order 
+
+    # For multiple orders, trace the edges
+    # for o in range(num_orders):
+    #     upper_edges.append(trace_edge(masterflat, upper_positions[o], False))
+    #     lower_edges.append(trace_edge(masterflat, lower_positions[o], True))
+
+    # For single order, specifiy the index 
+    upper_edges.append(trace_edge(masterflat, upper_positions_left, False))
+    lower_edges.append(trace_edge(masterflat, lower_positions_left, True))
+
+    return np.array(upper_edges), np.array(lower_edges)
+
 #%%
 
 if __name__ == "__main__":
@@ -165,19 +286,24 @@ if __name__ == "__main__":
         std = hdul["STD"].data if "STD" in hdul else np.zeros_like(masterdark)
         mask = hdul["MASK"].data.astype(bool) if "MASK" in hdul else np.zeros_like(masterdark, dtype=bool)
 
-    data_dir = 'NIRSPEC_1/221228/fits/'
-    list_of_flats = 'NIRSPEC_1/221228/flats_list.txt'
+    data_dir = 'NIRSPEC_HeI/fits/'
+    list_of_flats = 'NIRSPEC_HeI/flats_list.txt'
 
     filenames = [line.strip() for line in open(list_of_flats)]
     # prepend the directory to each filename
     full_filenames = [os.path.join(data_dir, filename) for filename in filenames]
 
-    print(full_filenames)
-
     #raw_masterflat, raw_std = combine_flats(filenames, masterdark_hdul[0].data)
-    raw_masterflat, raw_std = combine_flats(full_filenames, masterdark)
+    raw_masterflat, raw_std = combine_flats_new(full_filenames, masterdark)
+
+    plt.imshow(raw_masterflat, aspect='auto', origin='lower')
+    plt.colorbar()
+    plt.title(f"Raw Master Flat for {FILTER}")
+    plt.show()
+
+    print(raw_masterflat.shape)
     #combine_flats(full_filenames, masterdark)
-    top_edges, bottom_edges = trace_edges(raw_masterflat, FILTER)
+    top_edges, bottom_edges = trace_edges_new(raw_masterflat)
 
     #dark_bad_pixels = np.array(masterdark_hdul["MASK"].data, dtype=bool)
     dark_bad_pixels = np.array(mask, dtype=bool)
@@ -188,7 +314,16 @@ if __name__ == "__main__":
     # Divide out smooth variations in spectrum
     masterflat, normalization = fit_and_divide(masterflat, top_edges, bottom_edges)
 
-    is_bad_pixel = identify_anomalous_gains(masterflat, is_bad_pixel, top_edges, bottom_edges)
+    plt.imshow(masterflat, aspect='auto', origin='lower')
+    plt.colorbar()
+    plt.title(f"Master Flat for {FILTER}")
+    plt.show()
+
+    plt.imshow(normalization, aspect='auto', origin='lower')
+    plt.colorbar()
+    plt.title(f"Normalization for {FILTER}")
+    plt.show()
+    # is_bad_pixel = identify_anomalous_gains(masterflat, is_bad_pixel, top_edges, bottom_edges)
 
     image_hdu = fits.PrimaryHDU(masterflat)
     bad_pixels_hdu = fits.ImageHDU(np.array(is_bad_pixel, dtype=int), name="BADPIX")
@@ -205,7 +340,19 @@ if __name__ == "__main__":
     mask[masterflat < FLAT_MIN] = True
     mask[masterflat > FLAT_MAX] = True
     mask[:, -RIGHT_MARGIN:] = True
+  
+    # Mask out all the values past x = 1200
+ 
+
     mask = np.logical_or(is_bad_pixel, mask)
+    
+    mask[:, 1100:] = True
+    # plot the mask 
+    plt.imshow(mask, aspect='auto', origin='lower')
+    plt.colorbar()
+    plt.title(f"Mask for {FILTER}")
+    plt.show()
+
     mask_hdu = fits.ImageHDU(np.array(mask, dtype=int), name="MASK")
 
     hdul = fits.HDUList([image_hdu, bad_pixels_hdu, edges_hdu, mask_hdu,
@@ -215,7 +362,7 @@ if __name__ == "__main__":
 
     hdul.writeto(os.path.join('./NIRSPEC_HeI'+ 'masterflat.fits'), overwrite=True)
 
-    plt.imshow(masterflat, aspect='auto', origin='lower')
+    plt.imshow(masterflat, aspect='auto', origin='lower', vmin=0, vmax=1.5)
     plt.colorbar()
     plt.title(f"Master Flat for {FILTER}")
     for o in range(len(hdul["EDGES"].data)):
